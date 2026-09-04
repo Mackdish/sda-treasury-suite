@@ -13,9 +13,11 @@ export const Route = createFileRoute("/_authenticated")({
   },
   component: () => (
     <AppShell>
-      <RouteGuard>
-        <Outlet />
-      </RouteGuard>
+      <AccountGate>
+        <RouteGuard>
+          <Outlet />
+        </RouteGuard>
+      </AccountGate>
     </AppShell>
   ),
 });
