@@ -11,7 +11,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="flex-1 flex flex-col min-w-0">
           <header className="h-14 flex items-center gap-2 border-b border-border px-3 bg-card sticky top-0 z-10 no-print">
             <SidebarTrigger />
-            <div className="ml-2 font-semibold text-primary">SDA Treasurer</div>
+          <div className="ml-2 font-semibold text-primary">SDA Treasurer</div>
+          <div className="font-semibold text-foreground/80">WOTE CENTRAL SDA CHURCH</div>
           </header>
           <NoticeMarquee />
           <main className="flex-1 p-4 md:p-6 overflow-x-hidden">{children}</main>
