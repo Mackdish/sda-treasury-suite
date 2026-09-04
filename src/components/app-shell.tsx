@@ -1,6 +1,7 @@
 import { type ReactNode } from "react";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
+import { NoticeMarquee } from "@/components/notice-marquee";
 
 export function AppShell({ children }: { children: ReactNode }) {
   return (
