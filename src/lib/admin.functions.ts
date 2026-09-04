@@ -236,11 +236,16 @@ export const updateManagedUser = createServerFn({ method: "POST" })
       throw new Error("You cannot deactivate your own account");
     }
 
-    const patch: Record<string, unknown> = {};
-    if (data.fullName !== undefined) patch["full_name"] = data.fullName;
-    if (data.phone !== undefined) patch["phone"] = data.phone;
-    if (data.isActive !== undefined) patch["is_active"] = data.isActive;
-    if (data.churchId !== undefined) patch["primary_church_id"] = data.churchId;
+    const patch: {
+      full_name?: string;
+      phone?: string | null;
+      is_active?: boolean;
+      primary_church_id?: string | null;
+    } = {};
+    if (data.fullName !== undefined) patch.full_name = data.fullName;
+    if (data.phone !== undefined) patch.phone = data.phone;
+    if (data.isActive !== undefined) patch.is_active = data.isActive;
+    if (data.churchId !== undefined) patch.primary_church_id = data.churchId;
     if (Object.keys(patch).length) {
       const { error } = await supabaseAdmin.from("profiles").update(patch).eq("id", data.userId);
       if (error) throw new Error(error.message);
