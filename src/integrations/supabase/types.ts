@@ -681,6 +681,9 @@ export type Database = {
       }
       profiles: {
         Row: {
+          approval_status: string
+          approved_at: string | null
+          approved_by: string | null
           created_at: string
           full_name: string | null
           id: string
@@ -688,9 +691,13 @@ export type Database = {
           member_id: string | null
           phone: string | null
           primary_church_id: string | null
+          rejection_reason: string | null
           updated_at: string
         }
         Insert: {
+          approval_status?: string
+          approved_at?: string | null
+          approved_by?: string | null
           created_at?: string
           full_name?: string | null
           id: string
@@ -698,9 +705,13 @@ export type Database = {
           member_id?: string | null
           phone?: string | null
           primary_church_id?: string | null
+          rejection_reason?: string | null
           updated_at?: string
         }
         Update: {
+          approval_status?: string
+          approved_at?: string | null
+          approved_by?: string | null
           created_at?: string
           full_name?: string | null
           id?: string
@@ -708,6 +719,7 @@ export type Database = {
           member_id?: string | null
           phone?: string | null
           primary_church_id?: string | null
+          rejection_reason?: string | null
           updated_at?: string
         }
         Relationships: [
