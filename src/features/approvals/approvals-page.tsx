@@ -28,7 +28,7 @@ export function ApprovalsPage() {
   const [rejectFor, setRejectFor] = useState<PendingRow | null>(null);
   const [reason, setReason] = useState("");
 
-  const { data: rows = [], isLoading } = useQuery({
+  const { data: rows = [], isLoading, error: queueError } = useQuery({
     queryKey: ["approvals-queue"],
     queryFn: async (): Promise<PendingRow[]> => {
       const [rc, ex, cs, wr] = await Promise.all([
@@ -45,6 +45,9 @@ export function ApprovalsPage() {
           .select("id,period_year,period_month,submitted_at,churches(name)")
           .eq("approval_status", "pending").order("submitted_at", { ascending: false }),
       ]);
+      const failed = [rc, ex, cs, wr].find((r) => r.error);
+      if (failed?.error) throw new Error(failed.error.message);
+
       const out: PendingRow[] = [];
       (rc.data ?? []).forEach((r: any) => out.push({
         kind: "receipt", id: r.id, ref: r.receipt_number, date: r.transaction_date,
@@ -77,10 +80,18 @@ export function ApprovalsPage() {
     const table = row.kind === "cash_statement" ? "cash_statements"
       : row.kind === "weekly_report" ? "weekly_reports"
       : row.kind === "receipt" ? "receipts" : "expenses";
-    const { error } = await (supabase.from(table) as any).update(patch).eq("id", row.id);
+    const { data, error } = await (supabase.from(table) as any)
+      .update(patch)
+      .eq("id", row.id)
+      .select("id");
     if (error) { toast.error(error.message); return; }
+    if (!data || data.length === 0) {
+      toast.error("You don't have permission to approve this record.");
+      return;
+    }
     toast.success("Approved");
     qc.invalidateQueries({ queryKey: ["approvals-queue"] });
+    qc.invalidateQueries({ queryKey: [table] });
   }
 
   async function doReject() {
@@ -89,13 +100,19 @@ export function ApprovalsPage() {
     const table = rejectFor.kind === "cash_statement" ? "cash_statements"
       : rejectFor.kind === "weekly_report" ? "weekly_reports"
       : rejectFor.kind === "receipt" ? "receipts" : "expenses";
-    const { error } = await supabase.from(table)
+    const { data, error } = await (supabase.from(table) as any)
       .update({ approval_status: "rejected", rejection_reason: reason.trim() })
-      .eq("id", rejectFor.id);
+      .eq("id", rejectFor.id)
+      .select("id");
     if (error) { toast.error(error.message); return; }
+    if (!data || data.length === 0) {
+      toast.error("You don't have permission to reject this record.");
+      return;
+    }
     toast.success("Rejected");
     setRejectFor(null); setReason("");
     qc.invalidateQueries({ queryKey: ["approvals-queue"] });
+    qc.invalidateQueries({ queryKey: [table] });
   }
 
   const kindLabel: Record<PendingRow["kind"], string> = {
@@ -112,7 +129,11 @@ export function ApprovalsPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {isLoading ? (
+          {queueError ? (
+            <div className="text-sm text-destructive py-6 text-center">
+              Could not load submissions: {(queueError as Error).message}
+            </div>
+          ) : isLoading ? (
             <div className="text-sm text-muted-foreground py-6 text-center">Loading…</div>
           ) : rows.length === 0 ? (
             <div className="text-sm text-muted-foreground py-10 text-center">

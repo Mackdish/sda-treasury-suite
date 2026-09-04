@@ -60,7 +60,7 @@ export function UserManagementCard({ churchId }: { churchId: string }) {
 
   const [editing, setEditing] = useState<ManagedUser | null>(null);
   const [deleting, setDeleting] = useState<ManagedUser | null>(null);
-  const [form, setForm] = useState({ fullName: "", phone: "", role: "member" as Role, password: "" });
+  const [form, setForm] = useState({ fullName: "", phone: "", role: "member" as Role, sendReset: false });
 
   const { data: users = [], isLoading } = useQuery({
     queryKey: ["managed-users"],
@@ -94,11 +94,20 @@ export function UserManagementCard({ churchId }: { churchId: string }) {
           phone: form.phone.trim() || null,
           role: form.role,
           churchId,
-          ...(form.password ? { password: form.password } : {}),
+          ...(form.sendReset
+            ? {
+                sendPasswordReset: true,
+                redirectTo: typeof window !== "undefined" ? `${window.location.origin}/auth` : undefined,
+              }
+            : {}),
         },
       });
     },
-    onSuccess: () => { toast.success("Profile saved"); setEditing(null); refresh(); },
+    onSuccess: () => {
+      toast.success(form.sendReset ? "Profile saved and reset email sent" : "Profile saved");
+      setEditing(null);
+      refresh();
+    },
     onError: (e: any) => toast.error(e?.message ?? "Failed"),
   });
 
@@ -114,7 +123,7 @@ export function UserManagementCard({ churchId }: { churchId: string }) {
       fullName: u.fullName === "—" ? "" : u.fullName,
       phone: u.phone ?? "",
       role: ((u.roles[0] as Role) ?? "member"),
-      password: "",
+      sendReset: false,
     });
   }
 
@@ -268,13 +277,20 @@ export function UserManagementCard({ churchId }: { churchId: string }) {
               </Select>
               <p className="mt-1 text-xs text-muted-foreground">{ROLE_HELP[form.role]}</p>
             </div>
-            <div>
-              <Label>New password (optional)</Label>
-              <Input
-                value={form.password}
-                onChange={(e) => setForm({ ...form, password: e.target.value })}
-                placeholder="min. 8 characters"
+            <div className="md:col-span-2 flex items-start gap-2 rounded-md border border-border p-3">
+              <input
+                id="send-reset"
+                type="checkbox"
+                className="mt-1"
+                checked={form.sendReset}
+                onChange={(e) => setForm({ ...form, sendReset: e.target.checked })}
               />
+              <Label htmlFor="send-reset" className="font-normal">
+                Email this person a password reset link
+                <span className="block text-xs text-muted-foreground">
+                  They choose their own new password from the link.
+                </span>
+              </Label>
             </div>
           </div>
           <DialogFooter>

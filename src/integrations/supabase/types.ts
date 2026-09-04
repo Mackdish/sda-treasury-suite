@@ -685,6 +685,7 @@ export type Database = {
           approved_at: string | null
           approved_by: string | null
           created_at: string
+          email: string | null
           full_name: string | null
           id: string
           is_active: boolean
@@ -699,6 +700,7 @@ export type Database = {
           approved_at?: string | null
           approved_by?: string | null
           created_at?: string
+          email?: string | null
           full_name?: string | null
           id: string
           is_active?: boolean
@@ -713,6 +715,7 @@ export type Database = {
           approved_at?: string | null
           approved_by?: string | null
           created_at?: string
+          email?: string | null
           full_name?: string | null
           id?: string
           is_active?: boolean
@@ -1105,6 +1108,13 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      ensure_my_profile: {
+        Args: never
+        Returns: {
+          approval_status: string
+          is_active: boolean
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]

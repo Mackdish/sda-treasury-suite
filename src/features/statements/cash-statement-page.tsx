@@ -11,10 +11,7 @@ import { formatCurrency } from "@/lib/format";
 import { Printer, FileDown, Eye, FileSpreadsheet } from "lucide-react";
 import { printElement } from "@/lib/print";
 import { SignaturePad } from "@/components/signature-pad";
-import { generateCashStatementPdf } from "@/lib/cash-statement-pdf";
-import { generateCashStatementWorkbook } from "@/lib/cash-statement-xlsx";
 import { splitReceipts, FUND_LABEL } from "@/lib/funds";
-import * as XLSX from "xlsx";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
@@ -43,6 +40,7 @@ export function CashStatementPage() {
   const [sigElder, setSigElder] = useState<string | null>(null);
   const [sigPastor, setSigPastor] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const { data } = useQuery({
     queryKey: ["cash-statement", church?.id, start, end],
@@ -120,21 +118,34 @@ export function CashStatementPage() {
       },
   });
 
-  const buildPdf = () => generateCashStatementPdf(pdfInput());
+  // Heavy export libraries are loaded on demand so the page itself stays fast.
+  const buildPdf = async () => {
+    const { generateCashStatementPdf } = await import("@/lib/cash-statement-pdf");
+    return generateCashStatementPdf(pdfInput());
+  };
 
   const fileBase = () =>
     `Cash_Statement_${church.name.replace(/[^a-z0-9]+/gi, "_")}_${start}_to_${end}`;
 
-  const downloadPdf = () => {
-    const doc = buildPdf();
+  const downloadPdf = async () => {
+    const doc = await buildPdf();
     doc.save(`${fileBase()}.pdf`);
   };
 
-  const downloadExcel = () => {
+  const downloadExcel = async () => {
+    const [XLSX, { generateCashStatementWorkbook }] = await Promise.all([
+      import("xlsx"),
+      import("@/lib/cash-statement-xlsx"),
+    ]);
     XLSX.writeFile(generateCashStatementWorkbook(pdfInput()), `${fileBase()}.xlsx`);
   };
 
-  const openPreview = () => setPreviewOpen(true);
+  const openPreview = async () => {
+    setPreviewOpen(true);
+    setPreviewUrl(null);
+    const doc = await buildPdf();
+    setPreviewUrl(doc.output("dataurlstring"));
+  };
 
   return (
     <div className="space-y-6">
@@ -324,7 +335,7 @@ export function CashStatementPage() {
           <iframe
             title="Cash statement PDF preview"
             className="w-full h-[75vh] rounded border border-border bg-white"
-            src={previewOpen ? buildPdf().output("dataurlstring") : "about:blank"}
+            src={previewOpen && previewUrl ? previewUrl : "about:blank"}
           />
           <DialogFooter>
             <Button variant="outline" onClick={() => setPreviewOpen(false)}>Close</Button>

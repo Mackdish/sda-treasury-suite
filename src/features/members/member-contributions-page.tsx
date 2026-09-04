@@ -11,12 +11,7 @@ import { PeriodPicker } from "@/components/period-picker";
 import { periodRange, downloadCsv, type PeriodKind } from "@/lib/periods";
 import { printElement } from "@/lib/print";
 import { Download, FileSpreadsheet, Printer, Search, Trophy } from "lucide-react";
-import * as XLSX from "xlsx";
-import {
-  generateMemberContributionsWorkbook,
-  memberRankHeader,
-  memberRankBody,
-} from "@/lib/member-contributions-xlsx";
+import { memberRankHeader, memberRankBody } from "@/lib/member-contributions-xlsx";
 
 type Row = {
   id: string; amount: number; transaction_date: string; member_id: string | null;
@@ -126,10 +121,16 @@ export function MemberContributionsPage() {
               memberRankHeader(exportInput),
               ...memberRankBody(exportInput),
             ])}><Download className="h-4 w-4 mr-1" /> Export CSV</Button>
-            <Button variant="outline" onClick={() => XLSX.writeFile(
-              generateMemberContributionsWorkbook(exportInput),
-              `member_contributions_${start}_${end}.xlsx`,
-            )}><FileSpreadsheet className="h-4 w-4 mr-1" /> Excel</Button>
+            <Button variant="outline" onClick={async () => {
+              const [XLSX, { generateMemberContributionsWorkbook }] = await Promise.all([
+                import("xlsx"),
+                import("@/lib/member-contributions-xlsx"),
+              ]);
+              XLSX.writeFile(
+                generateMemberContributionsWorkbook(exportInput),
+                `member_contributions_${start}_${end}.xlsx`,
+              );
+            }}><FileSpreadsheet className="h-4 w-4 mr-1" /> Excel</Button>
             <Button onClick={() => printElement("member-report", "Member Contributions")}><Printer className="h-4 w-4 mr-1" /> Print</Button>
           </>
         }

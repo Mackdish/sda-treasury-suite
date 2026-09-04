@@ -296,7 +296,7 @@ function NewReceiptDialog({
   });
 
   return (
-    <DialogContent className="max-w-2xl">
+    <DialogContent className="max-w-2xl w-[calc(100vw-2rem)] max-h-[90dvh] overflow-y-auto">
       <DialogHeader><DialogTitle>New Receipt</DialogTitle></DialogHeader>
       <div className="flex gap-2">
         <Button size="sm" variant={mode === "single" ? "default" : "outline"} onClick={() => setMode("single")}>
@@ -368,7 +368,7 @@ function NewReceiptDialog({
         ) : (
           <div className="md:col-span-2">
             <Label>Contributions by category *</Label>
-            <div className="mt-2 max-h-64 overflow-y-auto rounded-md border border-border divide-y divide-border">
+            <div className="mt-2 max-h-[45vh] overflow-y-auto rounded-md border border-border divide-y divide-border">
               {categories.map((c) => (
                 <div key={c.id} className="flex items-center gap-3 px-3 py-2">
                   <div className="flex-1 text-sm">
@@ -386,7 +386,7 @@ function NewReceiptDialog({
                 </div>
               ))}
             </div>
-            <div className="mt-2 flex justify-between text-sm font-medium">
+            <div className="sticky bottom-0 mt-2 flex justify-between rounded-md border border-border bg-background px-3 py-2 text-sm font-medium">
               <span>Total</span>
               <span>{formatCurrency(multiTotal)}</span>
             </div>
@@ -440,7 +440,7 @@ function PrintReceiptDialog({
   const total = receipts.reduce((s, r) => s + Number(r.amount || 0), 0);
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg w-[calc(100vw-2rem)] max-h-[90dvh] overflow-y-auto">
         <DialogHeader><DialogTitle>Receipt Preview</DialogTitle></DialogHeader>
         <div id="receipt-print" className="border border-border rounded-md p-6 text-sm bg-card">
           <div className="text-center border-b border-border pb-3 mb-3">
