@@ -44,6 +44,7 @@ function Landing() {
           <div className="flex items-center gap-2 font-semibold">
             <img src={sdaLogo} alt="Seventh-day Adventist Church logo" className="h-10 w-10 object-contain" width={40} height={40} />
             <span>SDA Treasurer</span>
+            <span className="font-semibold text-sidebar-foreground/80">WOTE CENTRAL SDA CHURCH</span>
           </div>
           <div className="flex gap-2">
             <Button asChild variant="secondary"><Link to="/auth">Sign in</Link></Button>
