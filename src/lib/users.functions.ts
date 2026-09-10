@@ -1,199 +1,202 @@
 import { createServerFn } from "@tanstack/react-start";
-import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import type { Database } from "@/integrations/supabase/types";
 
 const roleEnum = z.enum(["admin", "pastor", "elder", "treasurer", "auditor", "member"]);
 
-/**
- * Sign-up client used to create accounts WITHOUT the service-role key
- * (the app is deployed to Cloudflare where no admin key is available).
- * Sign-ups are auto-confirmed in the auth settings, and a database trigger
- * creates the matching profile row.
- */
-function publicAuthClient() {
-  const url = process.env["SUPABASE_URL"]!;
-  const key = process.env["SUPABASE_PUBLISHABLE_KEY"]!;
-  return createClient<Database>(url, key, {
-    auth: { storage: undefined, persistSession: false, autoRefreshToken: false },
-    global: {
-      fetch: (input, init) => {
-        const headers = new Headers(init?.headers);
-        if (key.startsWith("sb_") && headers.get("Authorization") === `Bearer ${key}`) {
-          headers.delete("Authorization");
-        }
-        headers.set("apikey", key);
-        return fetch(input, { ...init, headers });
-      },
-    },
-  });
-}
-
 async function assertAdmin(context: { supabase: any; userId: string }) {
-  const { data: isAdmin } = await context.supabase.rpc("has_role", {
+  const { data: isAdmin, error } = await context.supabase.rpc("has_role", {
     _user_id: context.userId,
     _role: "admin",
   });
-  if (!isAdmin) throw new Error("Only administrators can manage accounts");
+  if (error || !isAdmin) throw new Error("Administrator access required");
 }
 
-/** Creates the auth user via sign-up, then finishes the profile + role as admin. */
-async function provisionUser(
-  context: { supabase: any; userId: string },
-  input: {
-    email: string;
-    password: string;
-    fullName: string;
-    role: z.infer<typeof roleEnum>;
-    churchId: string;
-    memberId?: string | null;
-    phone?: string | null;
-  },
-) {
-  const auth = publicAuthClient();
-  const { data: signed, error: signUpError } = await auth.auth.signUp({
-    email: input.email,
-    password: input.password,
-    options: { data: { full_name: input.fullName } },
-  });
-  if (signUpError) throw new Error(signUpError.message);
-  const uid = signed.user?.id;
-  if (!uid) throw new Error("An account with this email already exists");
-
-  // The trigger created the profile row; complete it with the church + details.
-  const { error: profileError } = await context.supabase
-    .from("profiles")
-    .update({
-      full_name: input.fullName,
-      email: input.email,
-      phone: input.phone ?? null,
-      primary_church_id: input.churchId,
-      member_id: input.memberId ?? null,
-      is_active: true,
-      approval_status: "approved",
-      approved_at: new Date().toISOString(),
-      approved_by: context.userId,
-    })
-    .eq("id", uid);
-  if (profileError) throw new Error(profileError.message);
-
-  await context.supabase.from("user_roles").delete().eq("user_id", uid);
-  const { error: roleError } = await context.supabase
-    .from("user_roles")
-    .insert({ user_id: uid, role: input.role, church_id: input.churchId });
-  if (roleError) throw new Error(roleError.message);
-
-  return uid;
+function randomToken() {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-const schema = z.object({
+function sha256Hex(value: string) {
+  return crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)).then((buffer) =>
+    Array.from(new Uint8Array(buffer), (b) => b.toString(16).padStart(2, "0")).join(""),
+  );
+}
+
+const invitationSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(8),
-  fullName: z.string().min(2),
+  fullName: z.string().min(2).max(150),
   role: roleEnum,
   churchId: z.string().uuid(),
   memberId: z.string().uuid().nullable().optional(),
-  phone: z.string().nullable().optional(),
+  phone: z.string().max(40).nullable().optional(),
 });
 
-export const createChurchUser = createServerFn({ method: "POST" })
+export type UserInvitation = {
+  id: string;
+  email: string;
+  fullName: string;
+  role: string;
+  churchId: string;
+  memberId: string | null;
+  expiresAt: string;
+  acceptedAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+};
+
+/**
+ * Creates an invitation only. No Supabase service-role key and no password
+ * is ever handled by the administrator or this server function.
+ */
+export const createUserInvitation = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) => schema.parse(data))
+  .inputValidator((data: unknown) => invitationSchema.parse(data))
   .handler(async ({ data, context }) => {
     await assertAdmin(context);
-    const userId = await provisionUser(context, data);
-    return { userId };
+
+    const token = randomToken();
+    const tokenHash = await sha256Hex(token);
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    const { data: invitation, error } = await context.supabase
+      .from("user_invitations")
+      .insert({
+        church_id: data.churchId,
+        email: data.email.trim().toLowerCase(),
+        full_name: data.fullName.trim(),
+        phone: data.phone?.trim() || null,
+        role: data.role,
+        member_id: data.memberId ?? null,
+        token_hash: tokenHash,
+        invited_by: context.userId,
+        expires_at: expiresAt,
+      })
+      .select("id,email,full_name,role,church_id,member_id,expires_at,accepted_at,revoked_at,created_at")
+      .single();
+
+    if (error) throw new Error(error.message);
+
+    await context.supabase.from("audit_log").insert({
+      church_id: data.churchId,
+      user_id: context.userId,
+      action: "user_invited",
+      entity: "user_invitations",
+      entity_id: invitation.id,
+      details: { email: data.email.trim().toLowerCase(), role: data.role, expires_at: expiresAt },
+    });
+
+    return {
+      invitation: invitation as UserInvitation,
+      token,
+      invitationUrl: `/auth?invite=${encodeURIComponent(token)}`,
+    };
   });
 
-export const listChurchUsers = createServerFn({ method: "GET" })
+export const listUserInvitations = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => z.object({ churchId: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     await assertAdmin(context);
-    const { data: roles, error } = await context.supabase
-      .from("user_roles")
-      .select("id,user_id,role")
-      .eq("church_id", data.churchId);
+    const { data: rows, error } = await context.supabase
+      .from("user_invitations")
+      .select("id,email,full_name,role,church_id,member_id,expires_at,accepted_at,revoked_at,created_at")
+      .eq("church_id", data.churchId)
+      .order("created_at", { ascending: false })
+      .limit(100);
     if (error) throw new Error(error.message);
-
-    const ids = [...new Set((roles ?? []).map((r: any) => r.user_id as string))];
-    const { data: profiles } = await context.supabase
-      .from("profiles")
-      .select("id,full_name,email")
-      .in("id", ids.length ? ids : ["00000000-0000-0000-0000-000000000000"]);
-    const byId = new Map((profiles ?? []).map((p: any) => [p.id as string, p]));
-
-    return (roles ?? []).map((r: any) => ({
-      id: r.id as string,
-      userId: r.user_id as string,
-      role: r.role as string,
-      fullName: (byId.get(r.user_id) as any)?.full_name ?? "—",
-      email: (byId.get(r.user_id) as any)?.email ?? "—",
-    }));
+    return (rows ?? []) as UserInvitation[];
   });
+
+export const revokeUserInvitation = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => z.object({ invitationId: z.string().uuid() }).parse(data))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context);
+    const { data: row, error } = await context.supabase
+      .from("user_invitations")
+      .update({ revoked_at: new Date().toISOString() })
+      .eq("id", data.invitationId)
+      .is("accepted_at", null)
+      .is("revoked_at", null)
+      .select("church_id")
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!row) throw new Error("Invitation is already accepted, revoked, or unavailable");
+
+    await context.supabase.from("audit_log").insert({
+      church_id: row.church_id,
+      user_id: context.userId,
+      action: "user_invitation_revoked",
+      entity: "user_invitations",
+      entity_id: data.invitationId,
+      details: {},
+    });
+    return { ok: true };
+  });
+
+export const completeUserInvitation = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => z.object({ token: z.string().min(32).max(128) }).parse(data))
+  .handler(async ({ data, context }) => {
+    const tokenHash = await sha256Hex(data.token);
+    const { data: result, error } = await context.supabase.rpc("complete_user_invitation", {
+      p_token_hash: tokenHash,
+    });
+    if (error) throw new Error(error.message);
+    const row = Array.isArray(result) ? result[0] : result;
+    return row;
+  });
+
+export const createChurchUser = createUserInvitation;
+export const listChurchUsers = listUserInvitations;
 
 const bulkSchema = z.object({
   churchId: z.string().uuid(),
   defaultRole: roleEnum,
-  invites: z
-    .array(
-      z.object({
-        email: z.string().email(),
-        fullName: z.string().min(2),
-        role: roleEnum.optional(),
-      }),
-    )
-    .min(1)
-    .max(200),
+  invites: z.array(z.object({ email: z.string().email(), fullName: z.string().min(2), role: roleEnum.optional() })).min(1).max(200),
 });
 
-function tempPassword() {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
-  let out = "";
-  for (let i = 0; i < 12; i += 1) out += chars[Math.floor(Math.random() * chars.length)];
-  return out;
-}
-
-/** Creates many accounts at once. Returns per-row status plus the temporary
- *  password so the administrator can hand credentials to each person. */
 export const bulkInviteChurchUsers = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => bulkSchema.parse(data))
   .handler(async ({ data, context }) => {
     await assertAdmin(context);
-
-    const results: Array<{
-      email: string;
-      fullName: string;
-      role: string;
-      password?: string;
-      ok: boolean;
-      error?: string;
-    }> = [];
+    const results: Array<{ email: string; fullName: string; role: string; invitationUrl?: string; expiresAt?: string; ok: boolean; error?: string }> = [];
 
     for (const invite of data.invites) {
-      const role = invite.role ?? data.defaultRole;
-      const password = tempPassword();
       try {
-        await provisionUser(context, {
-          email: invite.email,
-          password,
-          fullName: invite.fullName,
-          role,
-          churchId: data.churchId,
+        const token = randomToken();
+        const tokenHash = await sha256Hex(token);
+        const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+        const role = invite.role ?? data.defaultRole;
+        const { data: row, error } = await context.supabase
+          .from("user_invitations")
+          .insert({
+            church_id: data.churchId,
+            email: invite.email.trim().toLowerCase(),
+            full_name: invite.fullName.trim(),
+            role,
+            token_hash: tokenHash,
+            invited_by: context.userId,
+            expires_at: expiresAt,
+          })
+          .select("id")
+          .single();
+        if (error) throw new Error(error.message);
+        await context.supabase.from("audit_log").insert({
+          church_id: data.churchId,
+          user_id: context.userId,
+          action: "user_invited",
+          entity: "user_invitations",
+          entity_id: row.id,
+          details: { email: invite.email.trim().toLowerCase(), role, expires_at: expiresAt },
         });
-        results.push({ email: invite.email, fullName: invite.fullName, role, password, ok: true });
+        results.push({ email: invite.email, fullName: invite.fullName, role, invitationUrl: `/auth?invite=${encodeURIComponent(token)}`, expiresAt, ok: true });
       } catch (e) {
-        results.push({
-          email: invite.email,
-          fullName: invite.fullName,
-          role,
-          ok: false,
-          error: e instanceof Error ? e.message : "Failed",
-        });
+        results.push({ email: invite.email, fullName: invite.fullName, role: invite.role ?? data.defaultRole, ok: false, error: e instanceof Error ? e.message : "Failed" });
       }
     }
-
     return results;
   });
