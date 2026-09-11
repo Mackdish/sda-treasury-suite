@@ -2,6 +2,12 @@
 -- Approved expenses are already included as deductions by the fund reconciliation
 -- query; this migration makes the accounting rule explicit and database-enforced.
 
+-- The fund column may be missing in databases where the earlier expense-fund
+-- migration was not applied. Create it here as well so this migration is safe
+-- to apply independently.
+alter table public.expenses
+  add column if not exists fund_type text not null default 'local';
+
 -- Normalize any existing expense records to the Local Church Fund.
 update public.expenses
 set fund_type = 'local'
