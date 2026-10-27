@@ -22,6 +22,7 @@ export default defineTool({
       supabase
         .from("receipts")
         .select("amount,offering_categories(name,fund_type,conference_split_pct)")
+        .neq("approval_status", "deleted")
         .eq("church_id", churchId)
         .gte("transaction_date", start_date)
         .lte("transaction_date", end_date),

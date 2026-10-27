@@ -40,11 +40,13 @@ async function loadKpis(): Promise<Kpis> {
     supabase
       .from("receipts")
       .select("id, amount, transaction_date, offering_category_id, offering_categories(name, fund_type)")
+      .neq("approval_status", "deleted")
       .gte("transaction_date", yearStart),
     supabase.from("expenses").select("amount, transaction_date").gte("transaction_date", yearStart),
     supabase
       .from("receipts")
       .select("id, receipt_number, member_name, amount, transaction_date")
+      .neq("approval_status", "deleted")
       .order("created_at", { ascending: false })
       .limit(8),
   ]);

@@ -13,7 +13,7 @@ import { Download } from "lucide-react";
 export type FundType = "trust" | "local" | "camp";
 export function FundsPage({ fundType, title, description }: { fundType: FundType; title: string; description: string }) {
   const { data: church } = useCurrentChurch(); const [kind, setKind] = useState<PeriodKind>("monthly"); const [anchor, setAnchor] = useState(new Date().toISOString().slice(0, 10)); const { start, end, label } = periodRange(kind, anchor);
-  const { data: rows = [] } = useQuery({ queryKey: ["funds", church?.id, start, end], enabled: !!church, queryFn: async () => { const { data } = await supabase.from("receipts").select("id,receipt_number,transaction_date,member_name,amount,departments(name),offering_categories!inner(name,fund_type,conference_split_pct)").eq("church_id", church!.id).gte("transaction_date", start).lte("transaction_date", end).order("transaction_date", { ascending: false }).limit(1000); return (data ?? []) as any[]; } });
+  const { data: rows = [] } = useQuery({ queryKey: ["funds", church?.id, start, end], enabled: !!church, queryFn: async () => { const { data } = await supabase.from("receipts").select("id,receipt_number,transaction_date,member_name,amount,departments(name),offering_categories!inner(name,fund_type,conference_split_pct)").neq("approval_status", "deleted").eq("church_id", church!.id).gte("transaction_date", start).lte("transaction_date", end).order("transaction_date", { ascending: false }).limit(1000); return (data ?? []) as any[]; } });
   // All expenses are Local Church Fund expenses. Do not query the optional
   // fund_type column here so the application remains compatible with older
   // databases while the migration is being applied.

@@ -49,6 +49,7 @@ export function CashStatementPage() {
       const [rc, ex] = await Promise.all([
         supabase.from("receipts")
           .select("amount,offering_categories(name,fund_type,conference_split_pct)")
+          .neq("approval_status", "deleted")
           .eq("church_id", church!.id).gte("transaction_date", start).lte("transaction_date", end),
         supabase.from("expenses")
           .select("amount,transaction_date,description,expense_categories(name)")

@@ -29,7 +29,7 @@ export function MonthlyStatementPage() {
     enabled: !!church,
     queryFn: async () => {
       const [rc, ex] = await Promise.all([
-        supabase.from("receipts").select("amount,offering_categories(name,fund_type,conference_split_pct)").eq("church_id", church!.id).gte("transaction_date", s).lte("transaction_date", e),
+        supabase.from("receipts").select("amount,offering_categories(name,fund_type,conference_split_pct)").neq("approval_status", "deleted").eq("church_id", church!.id).gte("transaction_date", s).lte("transaction_date", e),
         supabase.from("expenses").select("amount,expense_categories(name)").eq("church_id", church!.id).gte("transaction_date", s).lte("transaction_date", e),
       ]);
       return { r: (rc.data ?? []) as any[], ex: (ex.data ?? []) as any[] };
