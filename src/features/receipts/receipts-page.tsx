@@ -12,11 +12,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { formatCurrency } from "@/lib/format";
-import { Plus, Printer, Search, Receipt as ReceiptIcon, UserPlus, X, ChevronDown, ChevronRight, FileDown, ChevronsUpDown } from "lucide-react";
+import { Plus, Printer, Search, Receipt as ReceiptIcon, UserPlus, X, FileDown, Folder, FolderOpen, ArrowLeft, Download } from "lucide-react";
 import { printElement } from "@/lib/print";
 import { LockRowActions, LockStatusBadge } from "@/components/lock-actions";
 import { RecordActions } from "@/components/record-actions";
-import { groupReceiptsByMember, downloadCombinedReceipts, type MemberGroup } from "@/lib/member-receipts";
+import { groupReceiptsByMember, downloadCombinedReceipts, downloadSingleReceipt, isCountable, type MemberGroup } from "@/lib/member-receipts";
 
 type Category = { id: string; name: string; fund_type: "trust" | "local" | "camp"; conference_split_pct: number };
 type Department = { id: string; name: string };
@@ -43,7 +43,7 @@ export function ReceiptsPage() {
   const [q, setQ] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [openKey, setOpenKey] = useState<string | null>(null); // which member folder is open
   const [printing, setPrinting] = useState<ReceiptRow[] | null>(null);
   const [editing, setEditing] = useState<ReceiptRow | null>(null);
   const [hiddenReceiptIds, setHiddenReceiptIds] = useState<string[]>(() => readHiddenReceiptIds());
@@ -76,10 +76,7 @@ export function ReceiptsPage() {
   // Receipts are classified by member: all payments by one person sit under that person.
   const groups = useMemo(() => groupReceiptsByMember(filtered), [filtered]);
   const total = groups.reduce((s, g) => s + g.total, 0);
-  const searching = q.trim().length > 0;
-  const isOpen = (g: MemberGroup<ReceiptRow>) => expanded[g.key] ?? searching;
-  const allOpen = groups.length > 0 && groups.every(isOpen);
-  const toggleAll = () => setExpanded(Object.fromEntries(groups.map((g) => [g.key, !allOpen])));
+  const openGroup = openKey ? groups.find((g) => g.key === openKey) ?? null : null;
   const period = { from: from || undefined, to: to || undefined };
   const downloadGroups = (list: MemberGroup<ReceiptRow>[]) => {
     const usable = list.filter((g) => g.countable.length > 0);
@@ -92,66 +89,82 @@ export function ReceiptsPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Receipts" description="Sequentially numbered receipts for every offering and donation." actions={<Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild><Button><Plus className="h-4 w-4 mr-1" /> New Receipt</Button></DialogTrigger><NewReceiptDialog church={church} categories={cats} members={members} departments={departments} onDone={(row) => { setOpen(false); qc.invalidateQueries({ queryKey: ["receipts"] }); qc.invalidateQueries({ queryKey: ["dashboard"] }); if (row?.length) setPrinting(row); }} /></Dialog>} />
-      <Card>
-        <CardHeader className="space-y-3">
-          <div className="flex flex-row flex-wrap items-center justify-between gap-2">
-            <CardTitle className="text-base">Receipts by member · <span className="text-primary">{formatCurrency(total)}</span> <span className="text-xs font-normal text-muted-foreground">({groups.length} member{groups.length === 1 ? "" : "s"})</span></CardTitle>
-            <div className="relative w-80 max-w-full"><Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" /><Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search receipt, member, reference, category…" className="pl-8" /></div>
-          </div>
-          <div className="flex flex-wrap items-end gap-2">
-            <div><Label className="text-xs">From</Label><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-40" /></div>
-            <div><Label className="text-xs">To</Label><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="w-40" /></div>
-            {(from || to) && <Button size="sm" variant="ghost" onClick={() => { setFrom(""); setTo(""); }}><X className="h-4 w-4 mr-1" /> Clear dates</Button>}
-            <div className="ml-auto flex gap-2">
-              <Button size="sm" variant="outline" onClick={toggleAll} disabled={!groups.length}><ChevronsUpDown className="h-4 w-4 mr-1" /> {allOpen ? "Collapse all" : "Expand all"}</Button>
-              <Button size="sm" onClick={() => downloadGroups(groups)} disabled={!groups.length} title="One combined receipt per member, in a single PDF"><FileDown className="h-4 w-4 mr-1" /> Download all (one per member)</Button>
+      {openGroup ? (
+        <Card>
+          <CardHeader className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="ghost" onClick={() => setOpenKey(null)}><ArrowLeft className="h-4 w-4 mr-1" /> All members</Button>
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <FolderOpen className="h-5 w-5 shrink-0 text-primary" />
+                <CardTitle className="truncate text-base">{openGroup.name}</CardTitle>
+                {openGroup.membershipNumber && <span className="text-xs text-muted-foreground">#{openGroup.membershipNumber}</span>}
+              </div>
+              <Button size="sm" onClick={() => downloadGroups([openGroup])} disabled={openGroup.countable.length === 0} title="All of this member's payments in one receipt"><FileDown className="h-4 w-4 mr-1" /> Download summary (all payments)</Button>
             </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? <div className="py-8 text-center text-sm text-muted-foreground">Loading…</div> : groups.length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground"><ReceiptIcon className="h-6 w-6 mx-auto mb-2 opacity-50" />No receipts found.</div> : (
-            <div className="space-y-2">
-              {groups.map((g) => {
-                const open = isOpen(g);
-                return (
-                  <div key={g.key} className="rounded-md border border-border">
-                    <div className="flex flex-wrap items-center gap-2 bg-muted/40 px-3 py-2">
-                      <button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => setExpanded((cur) => ({ ...cur, [g.key]: !open }))} aria-expanded={open}>
-                        {open ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
-                        <span className="truncate font-medium">{g.name}</span>
-                        {g.membershipNumber && <span className="text-xs text-muted-foreground">#{g.membershipNumber}</span>}
-                        <span className="text-xs text-muted-foreground">· {g.receipts.length} receipt{g.receipts.length === 1 ? "" : "s"}</span>
-                      </button>
-                      <span className="font-semibold text-primary">{formatCurrency(g.total)}</span>
-                      <Button size="sm" variant="outline" onClick={() => downloadGroups([g])} disabled={g.countable.length === 0} title="Download one combined receipt for this member"><FileDown className="h-4 w-4 mr-1" /> Combined receipt</Button>
-                    </div>
-                    {open && (
-                      <div className="overflow-x-auto px-3 pb-2">
-                        <table className="w-full text-sm">
-                          <thead className="text-left text-muted-foreground"><tr><th className="py-2 pr-4">Date</th><th className="py-2 pr-4">Receipt #</th><th className="py-2 pr-4">Category</th><th className="py-2 pr-4">Method</th><th className="py-2 pr-4 text-right">Amount</th><th className="py-2 pr-4">Status</th><th className="py-2 pr-4"></th></tr></thead>
-                          <tbody>
-                            {g.receipts.map((r) => (
-                              <tr key={r.id} className="border-t border-border">
-                                <td className="py-2 pr-4">{r.transaction_date}</td>
-                                <td className="py-2 pr-4 font-mono">{r.receipt_number}</td>
-                                <td className="py-2 pr-4">{r.offering_categories?.name ?? "—"}</td>
-                                <td className="py-2 pr-4 capitalize">{r.payment_method.replace("_", " ")}</td>
-                                <td className="py-2 pr-4 text-right">{formatCurrency(r.amount)}</td>
-                                <td className="py-2 pr-4"><LockStatusBadge isLocked={r.is_locked} reversedAt={r.reversed_at} approvalStatus={r.approval_status} /></td>
-                                <td className="py-2 pr-4 text-right"><div className="flex items-center justify-end gap-1"><RecordActions table="receipts" id={r.id} approvalStatus={r.approval_status} isLocked={r.is_locked || !!r.reversed_at} onEdit={() => setEditing(r)} invalidateKeys={["receipts", "dashboard", "funds"]} /><LockRowActions table="receipts" id={r.id} isLocked={r.is_locked} reversedAt={r.reversed_at} approvalStatus={r.approval_status} rejectionReason={r.rejection_reason} invalidateKeys={["receipts", "dashboard"]} /><Button size="sm" variant="ghost" onClick={() => setPrinting([r])} title="Print this single receipt"><Printer className="h-4 w-4" /></Button></div></td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+            <div className="text-sm text-muted-foreground">
+              {openGroup.receipts.length} receipt{openGroup.receipts.length === 1 ? "" : "s"} · total given <span className="font-semibold text-primary">{formatCurrency(openGroup.total)}</span>
+              {(from || to) && <> · {from || "start"} to {to || "date"}</>}
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-left text-muted-foreground"><tr><th className="py-2 pr-4">Date</th><th className="py-2 pr-4">Receipt #</th><th className="py-2 pr-4">Category</th><th className="py-2 pr-4">Method</th><th className="py-2 pr-4 text-right">Amount</th><th className="py-2 pr-4">Status</th><th className="py-2 pr-4"></th></tr></thead>
+                <tbody>
+                  {openGroup.receipts.map((r) => (
+                    <tr key={r.id} className="border-t border-border">
+                      <td className="py-2 pr-4">{r.transaction_date}</td>
+                      <td className="py-2 pr-4 font-mono">{r.receipt_number}</td>
+                      <td className="py-2 pr-4">{r.offering_categories?.name ?? "—"}</td>
+                      <td className="py-2 pr-4 capitalize">{r.payment_method.replace("_", " ")}</td>
+                      <td className="py-2 pr-4 text-right">{formatCurrency(r.amount)}</td>
+                      <td className="py-2 pr-4"><LockStatusBadge isLocked={r.is_locked} reversedAt={r.reversed_at} approvalStatus={r.approval_status} /></td>
+                      <td className="py-2 pr-4 text-right"><div className="flex items-center justify-end gap-1"><RecordActions table="receipts" id={r.id} approvalStatus={r.approval_status} isLocked={r.is_locked || !!r.reversed_at} onEdit={() => setEditing(r)} invalidateKeys={["receipts", "dashboard", "funds"]} /><LockRowActions table="receipts" id={r.id} isLocked={r.is_locked} reversedAt={r.reversed_at} approvalStatus={r.approval_status} rejectionReason={r.rejection_reason} invalidateKeys={["receipts", "dashboard"]} /><Button size="sm" variant="ghost" onClick={() => downloadSingleReceipt(r, church!)} disabled={!isCountable(r)} title="Download this receipt as PDF"><Download className="h-4 w-4" /></Button><Button size="sm" variant="ghost" onClick={() => setPrinting([r])} title="Print this single receipt"><Printer className="h-4 w-4" /></Button></div></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card>
+          <CardHeader className="space-y-3">
+            <div className="flex flex-row flex-wrap items-center justify-between gap-2">
+              <CardTitle className="text-base">Member folders · <span className="text-primary">{formatCurrency(total)}</span> <span className="text-xs font-normal text-muted-foreground">({groups.length} member{groups.length === 1 ? "" : "s"})</span></CardTitle>
+              <div className="relative w-80 max-w-full"><Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" /><Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search member, receipt, reference, category…" className="pl-8" /></div>
+            </div>
+            <div className="flex flex-wrap items-end gap-2">
+              <div><Label className="text-xs">From</Label><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-40" /></div>
+              <div><Label className="text-xs">To</Label><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="w-40" /></div>
+              {(from || to) && <Button size="sm" variant="ghost" onClick={() => { setFrom(""); setTo(""); }}><X className="h-4 w-4 mr-1" /> Clear dates</Button>}
+              <div className="ml-auto"><Button size="sm" onClick={() => downloadGroups(groups)} disabled={!groups.length} title="One combined receipt per member, in a single PDF"><FileDown className="h-4 w-4 mr-1" /> Download all (one per member)</Button></div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {isLoading ? <div className="py-8 text-center text-sm text-muted-foreground">Loading…</div> : groups.length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground"><ReceiptIcon className="h-6 w-6 mx-auto mb-2 opacity-50" />No receipts found.</div> : (
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {groups.map((g) => (
+                  <button key={g.key} type="button" onClick={() => setOpenKey(g.key)} className="group flex flex-col gap-2 rounded-lg border border-border bg-card p-4 text-left transition hover:border-primary hover:bg-muted/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                    <div className="flex items-start gap-3">
+                      <Folder className="h-9 w-9 shrink-0 text-primary group-hover:hidden" />
+                      <FolderOpen className="hidden h-9 w-9 shrink-0 text-primary group-hover:block" />
+                      <div className="min-w-0">
+                        <div className="truncate font-medium">{g.name}</div>
+                        <div className="text-xs text-muted-foreground">{g.membershipNumber ? `#${g.membershipNumber} · ` : ""}{g.receipts.length} receipt{g.receipts.length === 1 ? "" : "s"}</div>
                       </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                    </div>
+                    <div className="flex items-baseline justify-between">
+                      <span className="text-xs text-muted-foreground">Last: {g.receipts[0]?.transaction_date ?? "—"}</span>
+                      <span className="font-semibold text-primary">{formatCurrency(g.total)}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
       {editing && <EditReceiptDialog receipt={editing} categories={cats} departments={departments} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); qc.invalidateQueries({ queryKey: ["receipts"] }); qc.invalidateQueries({ queryKey: ["dashboard"] }); qc.invalidateQueries({ queryKey: ["funds"] }); }} />}
       {printing && <PrintReceiptDialog receipts={printing} church={church} onClose={() => setPrinting(null)} />}
     </div>
