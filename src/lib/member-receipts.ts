@@ -115,14 +115,18 @@ export function generateCombinedReceiptsPdf(
   groups: MemberGroup[],
   church: CombinedReceiptChurch,
   period?: { from?: string; to?: string },
+  opts?: { title?: string; periodLabel?: string; periodValue?: string },
 ): jsPDF {
+  const title = opts?.title ?? "COMBINED OFFICIAL RECEIPT";
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const marginX = 40;
   const location = [church.address, church.city].filter(Boolean).join(", ");
+  const periodLabel = opts?.periodLabel ?? "Period:";
   const periodText =
-    period?.from || period?.to ? `${period.from || "start"} to ${period.to || "date"}` : "All recorded payments";
+    opts?.periodValue ??
+    (period?.from || period?.to ? `${period.from || "start"} to ${period.to || "date"}` : "All recorded payments");
   const issued = new Date().toISOString().slice(0, 10);
 
   const withReceipts = groups.filter((g) => g.countable.length > 0);
@@ -142,14 +146,14 @@ export function generateCombinedReceiptsPdf(
     doc.setFont("helvetica", "bold");
     doc.setFontSize(13);
     doc.setTextColor(20);
-    doc.text("COMBINED OFFICIAL RECEIPT", pageWidth / 2, 90, { align: "center" });
+    doc.text(title, pageWidth / 2, 90, { align: "center" });
 
     // Member block
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(90);
     doc.text("Received from:", marginX, 118);
-    doc.text("Period:", pageWidth / 2 + 20, 118);
+    doc.text(periodLabel, pageWidth / 2 + 20, 118);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(20);
     doc.text(g.name, marginX + 76, 118);
@@ -199,30 +203,34 @@ export function generateCombinedReceiptsPdf(
     });
     let y = (doc as any).lastAutoTable.finalY + 18;
 
-    // Summary by category
-    const byCategory = new Map<string, number>();
-    for (const r of lines) {
-      const k = r.offering_categories?.name ?? "Uncategorised";
-      byCategory.set(k, (byCategory.get(k) ?? 0) + Number(r.amount || 0));
+    // Summary by category (pointless for a single payment)
+    if (lines.length > 1) {
+      const byCategory = new Map<string, number>();
+      for (const r of lines) {
+        const k = r.offering_categories?.name ?? "Uncategorised";
+        byCategory.set(k, (byCategory.get(k) ?? 0) + Number(r.amount || 0));
+      }
+      if (y + 40 + byCategory.size * 18 > pageHeight - 150) {
+        doc.addPage();
+        y = 50;
+      }
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.setTextColor(20);
+      doc.text("Summary by category", marginX, y);
+      autoTable(doc, {
+        startY: y + 6,
+        body: [...byCategory.entries()].map(([name, amt]) => [name, money(amt)]),
+        theme: "plain",
+        styles: { fontSize: 9, cellPadding: 3 },
+        columnStyles: { 1: { halign: "right" } },
+        tableWidth: 280,
+        margin: { left: marginX },
+      });
+      y = (doc as any).lastAutoTable.finalY + 36;
+    } else {
+      y += 30;
     }
-    if (y + 40 + byCategory.size * 18 > pageHeight - 150) {
-      doc.addPage();
-      y = 50;
-    }
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.setTextColor(20);
-    doc.text("Summary by category", marginX, y);
-    autoTable(doc, {
-      startY: y + 6,
-      body: [...byCategory.entries()].map(([name, amt]) => [name, money(amt)]),
-      theme: "plain",
-      styles: { fontSize: 9, cellPadding: 3 },
-      columnStyles: { 1: { halign: "right" } },
-      tableWidth: 280,
-      margin: { left: marginX },
-    });
-    y = (doc as any).lastAutoTable.finalY + 36;
 
     // Signatures
     if (y > pageHeight - 110) {
@@ -262,4 +270,22 @@ export function downloadCombinedReceipts(
       ? `combined-receipt-${slug(groups[0]!.name) || "member"}-${date}.pdf`
       : `combined-receipts-by-member-${date}.pdf`;
   doc.save(name);
+}
+
+/**
+ * Downloads one receipt on its own as an "Official Receipt" PDF
+ * (same layout as the combined receipt, with just that one payment).
+ */
+export function downloadSingleReceipt(receipt: MemberReceiptLine, church: CombinedReceiptChurch) {
+  const group: MemberGroup = {
+    key: `single:${receipt.id}`,
+    name: receipt.member_name?.trim() || "Unnamed giver",
+    membershipNumber: receipt.membership_number ?? null,
+    phone: receipt.phone ?? null,
+    receipts: [receipt],
+    countable: isCountable(receipt) ? [receipt] : [],
+    total: isCountable(receipt) ? Number(receipt.amount || 0) : 0,
+  };
+  const doc = generateCombinedReceiptsPdf([group], church, undefined, { title: "OFFICIAL RECEIPT", periodLabel: "Date:", periodValue: receipt.transaction_date });
+  doc.save(`receipt-${receipt.receipt_number}.pdf`);
 }
