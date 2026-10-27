@@ -8,26 +8,9 @@ import { useState } from "react";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { deleteRecord } from "@/lib/delete-record";
 
 type TableName = "receipts" | "expenses";
-
-const HIDDEN_RECEIPTS_KEY = "sda-treasury-hidden-receipts";
-
-function getHiddenReceipts(): string[] {
-  try {
-    const value = localStorage.getItem(HIDDEN_RECEIPTS_KEY);
-    return value ? JSON.parse(value) : [];
-  } catch {
-    return [];
-  }
-}
-
-function hideReceipt(id: string) {
-  const ids = new Set(getHiddenReceipts());
-  ids.add(id);
-  localStorage.setItem(HIDDEN_RECEIPTS_KEY, JSON.stringify([...ids]));
-  window.dispatchEvent(new CustomEvent("receipt-hidden", { detail: id }));
-}
 
 export function RecordActions({ table, id, approvalStatus, isLocked, onEdit, invalidateKeys }: { table: TableName; id: string; approvalStatus: "draft" | "pending" | "approved" | "rejected"; isLocked?: boolean; onEdit: () => void; invalidateKeys: string[] }) {
   const { data: roles = [] } = useUserRoles();
@@ -42,20 +25,17 @@ export function RecordActions({ table, id, approvalStatus, isLocked, onEdit, inv
   const remove = useMutation({
     mutationFn: async () => {
       if (confirmation !== "DELETE") throw new Error("Type DELETE to confirm deletion");
-
-      if (table === "receipts") {
-        // UI-only deletion: do not depend on a Supabase RPC or migration.
-        hideReceipt(id);
-        return;
-      }
-
-      const { error } = await supabase.from(table).delete().eq("id", id);
-      if (error) throw error;
+      await deleteRecord(table, id);
     },
     onSuccess: () => {
-      toast.success(`${table === "receipts" ? "Receipt removed from this device" : "Expense deleted"}`);
+      toast.success(`${table === "receipts" ? "Receipt" : "Expense"} deleted`);
       setConfirmOpen(false);
       setConfirmation("");
+      // Remove the row from every cached list straight away so it vanishes
+      // from the UI immediately, then refetch to confirm with the database.
+      qc.setQueriesData({ queryKey: [table] }, (old: unknown) =>
+        Array.isArray(old) ? old.filter((r: any) => r?.id !== id) : old,
+      );
       invalidateKeys.forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
       qc.invalidateQueries({ queryKey: ["dashboard"] });
       qc.invalidateQueries({ queryKey: ["funds"] });
@@ -86,9 +66,7 @@ export function RecordActions({ table, id, approvalStatus, isLocked, onEdit, inv
             <DialogTitle>Delete {table === "receipts" ? "receipt" : "expense"}?</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            {table === "receipts"
-              ? "The receipt will disappear from this device. The database record will not be changed. Type DELETE to continue."
-              : "This action is permanent and will be recorded in the audit trail. Type DELETE to continue."}
+            This will remove the {table === "receipts" ? "receipt" : "expense"} and it will no longer appear anywhere in the app. Type DELETE to continue.
           </p>
           <div className="space-y-2">
             <Label>Confirmation</Label>

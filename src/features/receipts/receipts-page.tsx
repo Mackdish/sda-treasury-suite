@@ -16,6 +16,8 @@ import { Plus, Printer, Search, Receipt as ReceiptIcon, UserPlus, X, FileDown, F
 import { printElement } from "@/lib/print";
 import { LockRowActions, LockStatusBadge } from "@/components/lock-actions";
 import { RecordActions } from "@/components/record-actions";
+import { useUserRoles, hasAnyRole } from "@/lib/access";
+import { purgeLegacyHiddenReceipts } from "@/lib/delete-record";
 import { groupReceiptsByMember, downloadCombinedReceipts, downloadSingleReceipt, isCountable, type MemberGroup } from "@/lib/member-receipts";
 
 type Category = { id: string; name: string; fund_type: "trust" | "local" | "camp"; conference_split_pct: number };
@@ -24,18 +26,6 @@ type Member = { id: string; full_name: string; membership_number: string | null;
 type ReceiptRow = { id: string; receipt_number: string; transaction_date: string; member_id?: string | null; member_name: string | null; membership_number: string | null; phone?: string | null; department_id?: string | null; amount: number; payment_method: string; reference_number?: string | null; description?: string | null; is_locked: boolean; reversed_at: string | null; approval_status: "draft" | "pending" | "approved" | "rejected"; rejection_reason: string | null; offering_categories: { name: string; fund_type: string } | null };
 
 const PAY = ["cash", "mpesa", "bank_transfer", "cheque", "bank_deposit"] as const;
-const HIDDEN_RECEIPTS_KEY = "sda-treasury-hidden-receipts";
-
-function readHiddenReceiptIds(): string[] {
-  try {
-    const value = localStorage.getItem(HIDDEN_RECEIPTS_KEY);
-    const parsed = value ? JSON.parse(value) : [];
-    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
 export function ReceiptsPage() {
   const { data: church } = useCurrentChurch();
   const qc = useQueryClient();
@@ -46,33 +36,29 @@ export function ReceiptsPage() {
   const [openKey, setOpenKey] = useState<string | null>(null); // which member folder is open
   const [printing, setPrinting] = useState<ReceiptRow[] | null>(null);
   const [editing, setEditing] = useState<ReceiptRow | null>(null);
-  const [hiddenReceiptIds, setHiddenReceiptIds] = useState<string[]>(() => readHiddenReceiptIds());
 
+  // One-time clean-up of receipts that older versions only hid in this browser.
+  const { data: roles = [] } = useUserRoles();
+  const canPurge = hasAnyRole(roles, ["admin", "treasurer", "elder"]);
   useEffect(() => {
-    const onHidden = (event: Event) => {
-      const id = (event as CustomEvent<string>).detail;
-      if (!id) return;
-      setHiddenReceiptIds((current) => current.includes(id) ? current : [...current, id]);
-    };
-    window.addEventListener("receipt-hidden", onHidden);
-    return () => window.removeEventListener("receipt-hidden", onHidden);
-  }, []);
+    if (!canPurge) return;
+    purgeLegacyHiddenReceipts().then((n) => { if (n > 0) qc.invalidateQueries({ queryKey: ["receipts"] }); });
+  }, [canPurge, qc]);
 
   const { data: cats = [] } = useQuery({ queryKey: ["offering-cats", church?.id], enabled: !!church, queryFn: async () => { const { data } = await supabase.from("offering_categories").select("id,name,fund_type,conference_split_pct").eq("is_active", true).order("sort_order"); return (data ?? []) as Category[]; } });
   const { data: members = [] } = useQuery({ queryKey: ["members", church?.id], enabled: !!church, queryFn: async () => { const { data } = await supabase.from("church_members").select("id,full_name,membership_number,phone,department").eq("church_id", church!.id).order("full_name"); return (data ?? []) as Member[]; } });
   const { data: departments = [] } = useQuery({ queryKey: ["departments", church?.id], enabled: !!church, queryFn: async () => { const { data } = await supabase.from("departments").select("id,name").eq("church_id", church!.id).eq("is_active", true).order("sort_order"); return (data ?? []) as Department[]; } });
-  const { data: rows = [], isLoading } = useQuery({ queryKey: ["receipts", church?.id], enabled: !!church, queryFn: async () => { const { data } = await supabase.from("receipts").select("id,receipt_number,transaction_date,member_id,member_name,membership_number,phone,department_id,amount,payment_method,reference_number,description,is_locked,reversed_at,approval_status,rejection_reason,offering_categories(name,fund_type)").eq("church_id", church!.id).order("created_at", { ascending: false }).limit(500); return (data ?? []) as unknown as ReceiptRow[]; } });
+  const { data: rows = [], isLoading } = useQuery({ queryKey: ["receipts", church?.id], enabled: !!church, queryFn: async () => { const { data } = await supabase.from("receipts").select("id,receipt_number,transaction_date,member_id,member_name,membership_number,phone,department_id,amount,payment_method,reference_number,description,is_locked,reversed_at,approval_status,rejection_reason,offering_categories(name,fund_type)").neq("approval_status", "deleted").eq("church_id", church!.id).order("created_at", { ascending: false }).limit(500); return (data ?? []) as unknown as ReceiptRow[]; } });
 
-  const visibleRows = useMemo(() => rows.filter((r) => !hiddenReceiptIds.includes(r.id)), [rows, hiddenReceiptIds]);
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
-    return visibleRows.filter((r) => {
+    return rows.filter((r) => {
       if (from && r.transaction_date < from) return false;
       if (to && r.transaction_date > to) return false;
       if (!term) return true;
       return r.receipt_number.toLowerCase().includes(term) || (r.member_name ?? "").toLowerCase().includes(term) || (r.membership_number ?? "").toLowerCase().includes(term) || (r.reference_number ?? "").toLowerCase().includes(term) || (r.description ?? "").toLowerCase().includes(term) || (r.offering_categories?.name ?? "").toLowerCase().includes(term);
     });
-  }, [visibleRows, q, from, to]);
+  }, [rows, q, from, to]);
   // Receipts are classified by member: all payments by one person sit under that person.
   const groups = useMemo(() => groupReceiptsByMember(filtered), [filtered]);
   const total = groups.reduce((s, g) => s + g.total, 0);

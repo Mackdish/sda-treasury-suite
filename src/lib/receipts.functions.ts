@@ -25,6 +25,7 @@ export const getMyReceipt = createServerFn({ method: "POST" })
       .select(
         "id,receipt_number,transaction_date,amount,payment_method,description,member_id,member_name,church_id,offering_categories(name,fund_type)",
       )
+      .neq("approval_status", "deleted")
       .eq("id", data.receiptId)
       .maybeSingle();
     if (error) throw new Error(error.message);

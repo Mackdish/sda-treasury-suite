@@ -42,6 +42,7 @@ export function DepartmentsPage() {
       const { data } = await supabase
         .from("receipts")
         .select("id,amount,transaction_date,member_name,department_id,offering_categories(name,fund_type)")
+        .neq("approval_status", "deleted")
         .eq("church_id", church!.id)
         .gte("transaction_date", start)
         .lte("transaction_date", end)

@@ -32,6 +32,7 @@ export function RemittancePage() {
       const { data } = await supabase
         .from("receipts")
         .select("amount,offering_categories!inner(name,fund_type,conference_split_pct)")
+        .neq("approval_status", "deleted")
         .eq("church_id", church!.id)
         .eq("offering_categories.fund_type", "trust")
         .gte("transaction_date", start).lte("transaction_date", end);

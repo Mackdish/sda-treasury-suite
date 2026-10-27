@@ -30,7 +30,7 @@ export function ReportsPage() {
     enabled: !!church,
     queryFn: async () => {
       const [rc, ex] = await Promise.all([
-        supabase.from("receipts").select("transaction_date,receipt_number,member_name,amount,departments(name),offering_categories(name,fund_type,conference_split_pct)").eq("church_id", church!.id).gte("transaction_date", start).lte("transaction_date", end).order("transaction_date"),
+        supabase.from("receipts").select("transaction_date,receipt_number,member_name,amount,departments(name),offering_categories(name,fund_type,conference_split_pct)").neq("approval_status", "deleted").eq("church_id", church!.id).gte("transaction_date", start).lte("transaction_date", end).order("transaction_date"),
         supabase.from("expenses").select("transaction_date,amount,vendor,description,departments(name),expense_categories(name)").eq("church_id", church!.id).gte("transaction_date", start).lte("transaction_date", end).order("transaction_date"),
       ]);
       return { r: (rc.data ?? []) as any[], ex: (ex.data ?? []) as any[] };

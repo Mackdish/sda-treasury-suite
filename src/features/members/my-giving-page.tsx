@@ -59,6 +59,7 @@ export function MyGivingPage() {
       const { data: receipts } = await supabase
         .from("receipts")
         .select("id,receipt_number,transaction_date,amount,payment_method,description,offering_categories(name,fund_type)")
+        .neq("approval_status", "deleted")
         .eq("member_id", profile.member_id)
         .gte("transaction_date", `${year}-01-01`)
         .lte("transaction_date", `${year}-12-31`)

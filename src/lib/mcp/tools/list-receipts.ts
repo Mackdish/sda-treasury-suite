@@ -24,6 +24,7 @@ export default defineTool({
       .select(
         "id,receipt_number,transaction_date,amount,payment_method,member_name,description,approval_status,offering_categories(name,fund_type,conference_split_pct)",
       )
+      .neq("approval_status", "deleted")
       .eq("church_id", churchId)
       .order("transaction_date", { ascending: false })
       .limit(Math.min(Math.max(limit ?? 50, 1), 200));

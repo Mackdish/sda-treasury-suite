@@ -66,6 +66,7 @@ export function WeeklyReportPage() {
         supabase
           .from("receipts")
           .select("transaction_date,amount,payment_method,offering_categories(name,fund_type,conference_split_pct)")
+          .neq("approval_status", "deleted")
           .eq("church_id", church!.id).gte("transaction_date", s).lte("transaction_date", e),
         supabase
           .from("remittances")
