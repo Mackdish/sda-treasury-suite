@@ -39,6 +39,7 @@ import {
   deleteManagedUser,
   type ManagedUser,
 } from "@/lib/admin.functions";
+import { invitedRoleFor } from "@/lib/invite-link";
 
 type Role = "admin" | "pastor" | "elder" | "treasurer" | "auditor" | "member";
 
@@ -58,6 +59,7 @@ export function UserManagementCard({ churchId }: { churchId: string }) {
   const update = useServerFn(updateManagedUser);
   const remove = useServerFn(deleteManagedUser);
 
+  const [approveRoles, setApproveRoles] = useState<Record<string, Role>>({});
   const [editing, setEditing] = useState<ManagedUser | null>(null);
   const [deleting, setDeleting] = useState<ManagedUser | null>(null);
   const [form, setForm] = useState({ fullName: "", phone: "", role: "member" as Role, sendReset: false });
@@ -75,6 +77,17 @@ export function UserManagementCard({ churchId }: { churchId: string }) {
     mutationFn: (v: { userId: string; decision: "approved" | "rejected"; reason?: string }) =>
       approve({ data: v }),
     onSuccess: () => { toast.success("Updated"); refresh(); },
+    onError: (e: any) => toast.error(e?.message ?? "Failed"),
+  });
+
+  // Approve and assign the role + church in one step. The role is set first so a
+  // failure never leaves someone approved without access rights.
+  const approveWithRole = useMutation({
+    mutationFn: async (v: { userId: string; role: Role }) => {
+      await update({ data: { userId: v.userId, role: v.role, churchId } });
+      await approve({ data: { userId: v.userId, decision: "approved" } });
+    },
+    onSuccess: (_d, v) => { toast.success(`Approved as ${v.role}`); refresh(); },
     onError: (e: any) => toast.error(e?.message ?? "Failed"),
   });
 
@@ -145,10 +158,27 @@ export function UserManagementCard({ churchId }: { churchId: string }) {
                   <div className="text-sm font-medium truncate">{u.fullName}</div>
                   <div className="text-xs text-muted-foreground truncate">{u.email}</div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Select
+                    value={approveRoles[u.userId] ?? invitedRoleFor(u.email) ?? "member"}
+                    onValueChange={(v) => setApproveRoles((cur) => ({ ...cur, [u.userId]: v as Role }))}
+                  >
+                    <SelectTrigger className="h-8 w-32 capitalize"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {(Object.keys(ROLE_HELP) as Role[]).map((r) => (
+                        <SelectItem key={r} value={r} className="capitalize">{r}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <Button
                     size="sm"
-                    onClick={() => decide.mutate({ userId: u.userId, decision: "approved" })}
+                    disabled={approveWithRole.isPending}
+                    onClick={() =>
+                      approveWithRole.mutate({
+                        userId: u.userId,
+                        role: approveRoles[u.userId] ?? invitedRoleFor(u.email) ?? "member",
+                      })
+                    }
                   >
                     Approve
                   </Button>

@@ -13,9 +13,14 @@ import { toast } from "sonner";
 import sdaLogo from "@/assets/sda-logo.png";
 
 export const Route = createFileRoute("/auth")({
-  validateSearch: (s: Record<string, unknown>): { next?: string; invite?: string } => ({
+  validateSearch: (s: Record<string, unknown>): { next?: string; invite?: string; invited?: string; name?: string; email?: string; phone?: string } => ({
     ...(typeof s.next === "string" && s.next.startsWith("/") && !s.next.startsWith("//") ? { next: s.next } : {}),
     ...(typeof s.invite === "string" && s.invite.length >= 32 ? { invite: s.invite } : {}),
+    // Sign-up link created by an administrator (pre-fills the form; no database needed).
+    ...(s.invited === "1" || s.invited === 1 ? { invited: "1" } : {}),
+    ...(typeof s.name === "string" ? { name: s.name.slice(0, 150) } : {}),
+    ...(typeof s.email === "string" ? { email: s.email.slice(0, 254) } : {}),
+    ...(typeof s.phone === "string" ? { phone: s.phone.slice(0, 40) } : {}),
   }),
   head: () => ({ meta: [{ title: "Sign in — SDA Treasurer" }, { name: "description", content: "Sign in to the SDA Church Treasurer system." }] }),
   component: AuthPage,
@@ -23,11 +28,11 @@ export const Route = createFileRoute("/auth")({
 
 function AuthPage() {
   const navigate = useNavigate();
-  const { next, invite } = Route.useSearch();
+  const { next, invite, invited, name: invitedName, email: invitedEmail } = Route.useSearch();
   const complete = useServerFn(completeUserInvitation);
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(invitedEmail ?? "");
   const [password, setPassword] = useState("");
-  const [fullName, setFullName] = useState("");
+  const [fullName, setFullName] = useState(invitedName ?? "");
   const [loading, setLoading] = useState(false);
   const [inviteMessage, setInviteMessage] = useState("");
 
@@ -104,7 +109,7 @@ function AuthPage() {
         toast.error(e?.message ?? "Could not complete invitation");
       }
     } else {
-      toast.success("Account created. Check your email, then open the invitation link again to finish setup.");
+      toast.success(invite ? "Account created. Check your email, then open the invitation link again to finish setup." : "Account created. Confirm your email if asked, then sign in. An administrator must approve your access.");
     }
     setLoading(false);
   }
@@ -139,15 +144,16 @@ function AuthPage() {
       <div className="flex items-center justify-center p-6">
         <Card className="w-full max-w-md">
           <CardHeader>
-            <CardTitle>{invite ? "Accept your invitation" : "Welcome"}</CardTitle>
+            <CardTitle>{invite || invited ? "Accept your invitation" : "Welcome"}</CardTitle>
             <CardDescription>
-              {invite ? "Create your own secure password to join your church treasury." : "Sign in to your church treasury account."}
+              {invite || invited ? "Create your own secure password to join your church treasury." : "Sign in to your church treasury account."}
             </CardDescription>
           </CardHeader>
           <CardContent>
             {invite && <div className="mb-4 rounded-md border border-primary/30 bg-primary/5 p-3 text-sm">You were invited by a church administrator. Your role and church access are assigned securely after authentication.</div>}
+            {invited && !invite && <div className="mb-4 rounded-md border border-primary/30 bg-primary/5 p-3 text-sm">You were invited by a church administrator. Create your password below. An administrator will approve your access and assign your role.</div>}
             {inviteMessage && <div className="mb-4 rounded-md border p-3 text-sm">{inviteMessage}</div>}
-            <Tabs defaultValue={invite ? "signup" : "signin"}>
+            <Tabs defaultValue={invite || invited ? "signup" : "signin"}>
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="signin">Sign in</TabsTrigger>
                 <TabsTrigger value="signup">Create account</TabsTrigger>
@@ -170,7 +176,7 @@ function AuthPage() {
             </Tabs>
             <div className="my-4 flex items-center gap-3 text-xs text-muted-foreground"><div className="h-px flex-1 bg-border" /> OR <div className="h-px flex-1 bg-border" /></div>
             <Button type="button" variant="outline" className="w-full" onClick={handleGoogle}>Continue with Google</Button>
-            <p className="mt-4 text-xs text-muted-foreground text-center">Accounts created normally require administrator approval unless they are completed from a valid administrator invitation.</p>
+            <p className="mt-4 text-xs text-muted-foreground text-center">New accounts must be approved by a church administrator before they can sign in.</p>
           </CardContent>
         </Card>
       </div>
