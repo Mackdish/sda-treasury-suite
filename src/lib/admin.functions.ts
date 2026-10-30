@@ -340,3 +340,132 @@ export const clearTableData = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return { deleted: backup?.length ?? 0 };
   });
+
+/* ------------------------------------------------------------------ */
+/* Invitations + automatic approval (no table, no migration needed)    */
+/* ------------------------------------------------------------------ */
+
+/** Invitations older than this no longer auto-approve. */
+const INVITE_VALID_DAYS = 14;
+/**
+ * Roles that are approved automatically when invited. Administrator is left
+ * out on purpose: handing out full admin rights should always be a manual,
+ * deliberate click. Remove "admin" from the exclusion by adding it here.
+ */
+const AUTO_APPROVE_ROLES = new Set<string>(["pastor", "elder", "treasurer", "auditor", "member"]);
+
+/**
+ * Remembers who was invited, and with which role, in the existing audit_log
+ * table (shared by every administrator, on every device). autoApproveInvitedUsers
+ * reads it back to approve the matching sign-ups.
+ */
+export const recordInvitations = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) =>
+    z
+      .object({
+        churchId: z.string().uuid(),
+        invites: z
+          .array(
+            z.object({
+              email: z.string().email(),
+              fullName: z.string().max(150).nullable().optional(),
+              role: roleEnum,
+            }),
+          )
+          .min(1)
+          .max(200),
+      })
+      .parse(data),
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context);
+    const rows = data.invites.map((i) => ({
+      church_id: data.churchId,
+      user_id: context.userId,
+      action: "user_invited",
+      entity: "invitations",
+      entity_id: null,
+      details: { email: i.email.trim().toLowerCase(), role: i.role, fullName: i.fullName ?? null },
+    }));
+    const { error } = await context.supabase.from("audit_log").insert(rows);
+    if (error) throw new Error(error.message);
+    return { ok: true, count: rows.length };
+  });
+
+/**
+ * Approves every pending account whose email was invited by an administrator
+ * (within INVITE_VALID_DAYS), assigning the invited role. Anyone who was not
+ * invited stays pending for manual approval. Runs with the signed-in
+ * administrator's own session, so it needs no service-role key.
+ */
+export const autoApproveInvitedUsers = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => z.object({ churchId: z.string().uuid() }).parse(data))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context);
+
+    const { data: pending, error: pendingError } = await context.supabase
+      .from("profiles")
+      .select("id, email")
+      .eq("approval_status", "pending")
+      .eq("is_active", true);
+    if (pendingError) throw new Error(pendingError.message);
+
+    const candidates = ((pending ?? []) as any[]).filter((p) => !!p.email);
+    if (!candidates.length) return { approved: [] as { userId: string; email: string; role: string }[] };
+
+    const since = new Date(Date.now() - INVITE_VALID_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    const { data: invites, error: inviteError } = await context.supabase
+      .from("audit_log")
+      .select("details, created_at")
+      .eq("action", "user_invited")
+      .eq("church_id", data.churchId)
+      .gte("created_at", since)
+      .order("created_at", { ascending: false })
+      .limit(1000);
+    if (inviteError) throw new Error(inviteError.message);
+
+    // Newest invitation per email wins.
+    const roleByEmail = new Map<string, string>();
+    for (const row of (invites ?? []) as any[]) {
+      const email = String(row.details?.email ?? "").trim().toLowerCase();
+      const role = String(row.details?.role ?? "");
+      if (email && role && !roleByEmail.has(email)) roleByEmail.set(email, role);
+    }
+
+    const approved: { userId: string; email: string; role: string }[] = [];
+    for (const p of candidates) {
+      const role = roleByEmail.get(String(p.email).trim().toLowerCase());
+      if (!role || !AUTO_APPROVE_ROLES.has(role)) continue;
+      try {
+        // Role first, so a failure never leaves someone approved without access rights.
+        await context.supabase.from("user_roles").delete().eq("user_id", p.id);
+        const { error: roleError } = await context.supabase
+          .from("user_roles")
+          .insert({ user_id: p.id, role: role as any, church_id: data.churchId });
+        if (roleError) throw new Error(roleError.message);
+
+        const { error: approveError } = await context.supabase
+          .from("profiles")
+          .update({
+            approval_status: "approved",
+            approved_at: new Date().toISOString(),
+            approved_by: context.userId,
+            rejection_reason: null,
+            primary_church_id: data.churchId,
+          })
+          .eq("id", p.id);
+        if (approveError) throw new Error(approveError.message);
+
+        await writeAudit(context.supabase, context.userId, "user_auto_approved", "profiles", p.id, {
+          email: p.email,
+          role,
+        });
+        approved.push({ userId: p.id, email: p.email, role });
+      } catch {
+        // Leave this person pending; an administrator can approve them manually.
+      }
+    }
+    return { approved };
+  });

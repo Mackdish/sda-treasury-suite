@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { AppShell } from "@/components/app-shell";
 import { RouteGuard } from "@/components/role-gate";
 import { AccountGate } from "@/components/account-gate";
+import { AutoApproveInvited } from "@/components/auto-approve-invited";
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
@@ -14,6 +15,7 @@ export const Route = createFileRoute("/_authenticated")({
   component: () => (
     <AppShell>
       <AccountGate>
+        <AutoApproveInvited />
         <RouteGuard>
           <Outlet />
         </RouteGuard>

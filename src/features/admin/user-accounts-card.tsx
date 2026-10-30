@@ -6,7 +6,9 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { Copy, Mail, MessageCircle } from "lucide-react";
+import { useServerFn } from "@tanstack/react-start";
 import { useCurrentChurch } from "@/lib/church";
+import { recordInvitations } from "@/lib/admin.functions";
 import {
   INVITE_ROLES,
   buildInviteLink,
@@ -20,11 +22,12 @@ type Created = { fullName: string; email: string; phone: string; role: InviteRol
 
 /**
  * Invite a user by sign-up link. No invitation table is needed: the link
- * pre-fills the person's details, and once they sign up they appear under
- * "Pending approvals" where the administrator approves them with a role.
+ * pre-fills the person's details, and once they sign up they are approved automatically with the invited role
+ * (administrator invitations still need a manual approval).
  */
-export function UserAccountsCard(_props: { churchId: string }) {
+export function UserAccountsCard({ churchId }: { churchId: string }) {
   const { data: church } = useCurrentChurch();
+  const record = useServerFn(recordInvitations);
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
@@ -39,6 +42,10 @@ export function UserAccountsCard(_props: { churchId: string }) {
 
     const link = buildInviteLink(window.location.origin, { fullName: name, email: mail, phone });
     rememberInvitedRole(mail, role);
+    // Shared record of the invitation: lets any signed-in administrator auto-approve this person.
+    record({ data: { churchId, invites: [{ email: mail, fullName: name, role }] } }).catch((e) =>
+      toast.error(`Link created, but automatic approval is unavailable: ${e?.message ?? "could not save the invitation"}`),
+    );
     setCreated({ fullName: name, email: mail, phone: phone.trim(), role, link });
     navigator.clipboard?.writeText(link).then(
       () => toast.success("Invitation link created and copied"),
