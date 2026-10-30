@@ -64,9 +64,10 @@ export function UserManagementCard({ churchId }: { churchId: string }) {
   const [deleting, setDeleting] = useState<ManagedUser | null>(null);
   const [form, setForm] = useState({ fullName: "", phone: "", role: "member" as Role, sendReset: false });
 
-  const { data: users = [], isLoading } = useQuery({
+  const { data: users = [], isLoading, error: listError } = useQuery({
     queryKey: ["managed-users"],
     queryFn: () => list(),
+    refetchInterval: 20_000,
   });
 
   const pending = useMemo(() => users.filter((u) => u.approvalStatus === "pending"), [users]);
@@ -142,13 +143,21 @@ export function UserManagementCard({ churchId }: { churchId: string }) {
 
   return (
     <>
-      {pending.length > 0 && (
-        <Card className="border-primary/40">
+      <Card className={pending.length > 0 ? "border-primary/40" : undefined}>
           <CardHeader>
             <CardTitle className="text-base">Pending approvals ({pending.length})</CardTitle>
-            <CardDescription>New registrations cannot sign in until approved.</CardDescription>
+            <CardDescription>
+              People you invited are approved automatically with their invited role (administrator invitations excepted).
+              Anyone who signed up without an invitation waits here for you to approve them.
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
+            {listError && (
+              <p className="text-sm text-destructive">Could not load accounts: {(listError as Error).message}</p>
+            )}
+            {!listError && !isLoading && pending.length === 0 && (
+              <p className="text-sm text-muted-foreground">No one is waiting for approval.</p>
+            )}
             {pending.map((u) => (
               <div
                 key={u.userId}
@@ -200,7 +209,6 @@ export function UserManagementCard({ churchId }: { churchId: string }) {
             ))}
           </CardContent>
         </Card>
-      )}
 
       <Card>
         <CardHeader>

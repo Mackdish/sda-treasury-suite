@@ -6,6 +6,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
+import { useServerFn } from "@tanstack/react-start";
+import { recordInvitations } from "@/lib/admin.functions";
 
 type Role = "admin" | "pastor" | "elder" | "treasurer" | "auditor" | "member";
 type Result = { email: string; fullName: string; role: string; invitationUrl: string };
@@ -19,7 +21,8 @@ function parseRows(text: string, fallback: Role) {
   }).filter((r) => r.fullName.length >= 2 && r.email.includes("@"));
 }
 
-export function BulkInviteCard(_props: { churchId: string }) {
+export function BulkInviteCard({ churchId }: { churchId: string }) {
+  const record = useServerFn(recordInvitations);
   const [text, setText] = useState("");
   const [defaultRole, setDefaultRole] = useState<Role>("member");
   const [results, setResults] = useState<Result[]>([]);
@@ -38,6 +41,9 @@ export function BulkInviteCard(_props: { churchId: string }) {
       out.push({ fullName: r.fullName, email, role: r.role, invitationUrl: buildInviteLink(window.location.origin, { fullName: r.fullName, email }) });
     }
     setResults(out);
+    record({ data: { churchId, invites: out.map((o) => ({ email: o.email, fullName: o.fullName, role: o.role as Role })) } }).catch((e) =>
+      toast.error(`Links created, but automatic approval is unavailable: ${e?.message ?? "could not save the invitations"}`),
+    );
     toast.success(`${out.length} invitation link${out.length === 1 ? "" : "s"} created`);
   }
 
@@ -53,7 +59,7 @@ export function BulkInviteCard(_props: { churchId: string }) {
     <Card>
       <CardHeader>
         <CardTitle className="text-base">Bulk user invitations</CardTitle>
-        <CardDescription>Create sign-up links for many people at once. They appear under Pending approvals after signing up. No passwords are generated or exposed.</CardDescription>
+        <CardDescription>Create sign-up links for many people at once. They are approved automatically with the chosen role after signing up (administrator invitations need a manual approval). No passwords are generated or exposed.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-3 md:grid-cols-[1fr_200px]">

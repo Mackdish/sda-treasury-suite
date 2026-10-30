@@ -22,6 +22,8 @@ export function AccountGate({ children }: { children: ReactNode }) {
   const { data, isLoading } = useQuery({
     queryKey: ["account-status"],
     staleTime: 60 * 1000,
+    // While waiting for approval, keep checking so access opens without a manual refresh.
+    refetchInterval: (query) => (query.state.data?.approvalStatus === "pending" ? 10_000 : false),
     queryFn: async () => {
       await ensure({ data: {} });
       return status();
